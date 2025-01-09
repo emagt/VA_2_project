@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Interactive Graphs with D3.js</title>
+  <style>
+    svg {
+      font: 12px sans-serif;
+    }
+
+    .dot {
+      fill: steelblue;
+      stroke: black;
+      opacity: 0.7;
+    }
+
+    .dot.selected {
+      fill: red;
+      opacity: 1;
+    }
+
+    .bar.selected {
+      stroke: black;
+      stroke-width: 2;
+    }
+
+    .background path {
+      fill: none;
+      stroke: #ddd;
+      shape-rendering: crispEdges;
+    }
+
+    .foreground path {
+      fill: none;
+      stroke: steelblue;
+      opacity: 0.7;
+    }
+
+    .highlight {
+      stroke: red;
+      opacity: 1;
+    }
+
+    .bar-label {
+      font-size: 12px;
+      fill: black;
+      text-anchor: middle;
+    }
+
+    .legend {
+      font-size: 12px;
+    }
+
+    .legend rect {
+      stroke-width: 1;
+      stroke: black;
+    }
+
+    .container {
+      display: flex;
+      flex-direction: row;
+      gap: 20px;
+    }
+
+    .reset-button {
+      margin: 20px;
+      padding: 10px 20px;
+      font-size: 16px;
+      background-color: #007BFF;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+
+    .reset-button:hover {
+      background-color: #0056b3;
+    }
+
+    .axis-label {
+      font-size: 12px;
+      text-anchor: middle;
+      fill: black;
+    }
+
+    .legend {
+      font-size: 12px;
+      fill: black;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .legend-color {
+      width: 20px;
+      height: 20px;
+      display: inline-block;
+    }
+
+    .heatmap rect {
+      stroke: #ddd;
+      stroke-width: 0.5;
+    }
+
+    .heatmap text {
+      fill: black;
+      font-size: 10px;
+      text-anchor: middle;
+    }
+  </style>
+  <script src="https://d3js.org/d3.v6.min.js"></script>
+</head>
+<body>
+  <h1>Interactive Graphs: Scatterplot, Bar Chart, Parallel Coordinates, and Heatmap</h1>
+  <button class="reset-button" id="resetButton">Reset</button>
+  <div class="container">
+    <div>
+      <div id="scatterArea"></div>
+      <div id="scatterLegend" class="legend"></div>
+    </div>
+    <div>
+      <div id="chart"></div>
+      <div id="barLegend" class="legend"></div>
+    </div>
+  </div>
+  <h2>Heatmap of Variable Correlations</h2>
+  <div id="heatmap"></div>
+  <div id="heatmapLegend" class="legend"></div>
+  <h2>Parallel Coordinates</h2>
+  <div id="parallelCoordinates"></div>
+
+  <script>
+    // initial configuration of colors
+    const predefinedColors = ["#4CAF50", "#FF5722", "#2196F3", "#FFC107", "#9C27B0", "#00BCD4"];
+    const colorScale = d3.scaleOrdinal()
+      .domain(["Yes", "No", "Cluster 1", "2","3","0"])
+      .range(predefinedColors);
+    const scatterMargin = { top: 20, right: 20, bottom: 50, left: 50 },
+          scatterWidth = 600 - scatterMargin.left - scatterMargin.right,
+          scatterHeight = 500 - scatterMargin.top - scatterMargin.bottom;
+
+    const barMargin = { top: 20, right: 30, bottom: 40, left: 50 },
+          barWidth = 400 - barMargin.left - barMargin.right,
+          barHeight = 500 - barMargin.top - barMargin.bottom;
+
+    const heatmapMargin = { top: 50, right: 50, bottom: 10, left: 150 },
+          heatmapSize = 1600;
+
+    const parallelMargin = { top: 20, right: 30, bottom: 20, left: 50 },
+          parallelWidth = 2000 - parallelMargin.left - parallelMargin.right,
+          parallelHeight = 500 - parallelMargin.top - parallelMargin.bottom;
+
+    let selectedPoints = new Set();
+    let selectedBarGroup = null;
+
+    const scatterSvg = d3.select("#scatterArea").append("svg")
+      .attr("width", scatterWidth + scatterMargin.left + scatterMargin.right)
+      .attr("height", scatterHeight + scatterMargin.top + scatterMargin.bottom)
+      .append("g")
+      .attr("transform", `translate(${scatterMargin.left},${scatterMargin.top})`);
+
+    const barSvg = d3.select("#chart").append("svg")
+      .attr("width", barWidth + barMargin.left + barMargin.right)
+      .attr("height", barHeight + barMargin.top + barMargin.bottom)
+      .append("g")
+      .attr("transform", `translate(${barMargin.left},${barMargin.top})`);
+
+    const heatmapSvg = d3.select("#heatmap").append("svg")
+      .attr("width", heatmapSize + heatmapMargin.left + heatmapMargin.right)
+      .attr("height", heatmapSize/2 + heatmapMargin.top + heatmapMargin.bottom)
+      .append("g")
+      .attr("transform", `translate(${heatmapMargin.left},${heatmapMargin.top})`);
+
+    const parallelSvg = d3.select("#parallelCoordinates").append("svg")
+      .attr("width", parallelWidth + parallelMargin.left + parallelMargin.right)
+      .attr("height", parallelHeight + parallelMargin.top + parallelMargin.bottom)
+      .append("g")
+      .attr("transform", `translate(${parallelMargin.left},${parallelMargin.top})`);
+
+    let scatterPoints; // Declare outside so it can be accsesible gloabaly 
+    d3.csv("tsne_clusters_completo.csv").then(data => {
+      data.forEach((d, i) => {
+        d.id = i;
+        d.X = +d.X;
+        d.Y = +d.Y;
+        d.Depression = +d.Depression;
+        d.Gender = +d.Gender;
+        d.Cluster = d.Cluster;
+      });
+
+      const xScatter = d3.scaleLinear().range([0, scatterWidth]);
+      const yScatter = d3.scaleLinear().range([scatterHeight, 0]);
+      const colorScatter = d3.scaleOrdinal(d3.schemeCategory10);
+
+      xScatter.domain(d3.extent(data, d => d.X));
+      yScatter.domain(d3.extent(data, d => d.Y));
+
+      scatterSvg.append("g")
+        .attr("transform", `translate(0,${scatterHeight})`)
+        .call(d3.axisBottom(xScatter));
+
+      scatterSvg.append("g").call(d3.axisLeft(yScatter));
+
+      scatterPoints = scatterSvg.selectAll(".dot")
+        .data(data)
+        .enter().append("circle")
+        .attr("class", "dot")
+        .attr("cx", d => xScatter(d.X))
+        .attr("cy", d => yScatter(d.Y))
+        .attr("r", 5)
+        .style("fill", d => colorScale(d.Cluster)) //use predefine colors
+        .style("opacity", 0.8);
+      
+      const scatterCategories = [...new Set(data.map(d => d.Cluster))];
+      function createScatterLegend(colorScale, categories) {
+        const legend = d3.select("#scatterLegend");
+        legend.selectAll("*").remove(); // Limpia cualquier leyenda existente
+
+        const legendItems = legend.selectAll(".legend-item")
+          .data(categories)
+          .enter()
+          .append("div")
+          .attr("class", "legend-item");
+
+        legendItems.append("span")
+          .attr("class", "legend-color")
+          .style("background-color", d => colorScale(d));
+
+        legendItems.append("span").text(d => d);
+      }
+
+      createScatterLegend(colorScale, scatterCategories);
+
+      // Bar Chart Legend
+      const barCategories = ["Yes", "No"];
+      const barColors = d3.scaleOrdinal().domain(barCategories).range(["#4CAF50", "#FF5722"]);
+
+      function createBarLegend(colorScale, categories) {
+        const legend = d3.select("#barLegend");
+        legend.selectAll("*").remove();
+
+        const legendItems = legend.selectAll(".legend-item")
+          .data(categories)
+          .enter()
+          .append("div")
+          .attr("class", "legend-item");
+
+        legendItems.append("span")
+          .attr("class", "legend-color")
+          .style("background-color", d => colorScale(d));
+
+        legendItems.append("span").text(d => d);
+      }
+
+      createBarLegend(barColors, barCategories);
+
+
+      // Heatmap Legend
+      const heatmapColorScale = d3.scaleSequential(d3.interpolateRdBu).domain([-1, 1]);
+
+      function createHeatmapLegend(colorScale) {
+        const legend = d3.select("#heatmapLegend");
+        legend.selectAll("*").remove();
+
+        const gradientSvg = legend.append("svg")
+          .attr("width", 300)
+          .attr("height", 50)
+          .style("margin-top", "-1px"); // Reduce el margen entre el heatmap y la leyenda
+
+        const gradient = gradientSvg.append("defs")
+          .append("linearGradient")
+          .attr("id", "heatmap-gradient")
+          .attr("x1", "0%")
+          .attr("x2", "100%")
+          .attr("y1", "0%")
+          .attr("y2", "0%");
+
+        const stops = d3.range(-1, 1.1, 0.1);
+        stops.forEach((stop, i) => {
+          gradient.append("stop")
+            .attr("offset", `${(i / (stops.length - 1)) * 100}%`)
+            .attr("stop-color", colorScale(stop));
+        });
+
+        gradientSvg.append("rect")
+          .attr("x", 10)
+          .attr("y", 10)
+          .attr("width", 280)
+          .attr("height", 20)
+          .style("fill", "url(#heatmap-gradient)");
+
+        gradientSvg.append("text")
+          .attr("x", 10)
+          .attr("y", 45)
+          .text("-1");
+
+        gradientSvg.append("text")
+          .attr("x", 270)
+          .attr("y", 45)
+          .text("1");
+      }
+
+      createHeatmapLegend(heatmapColorScale);
+
+
+
+      
+
+      scatterSvg.append("g")
+        .attr("class", "brush")
+        .call(d3.brush()
+          .extent([[0, 0], [scatterWidth, scatterHeight]])
+          .on("start brush", (event) => {
+            if (!event.selection) return;
+
+            const [[x0, y0], [x1, y1]] = event.selection;
+            selectedPoints = new Set(
+              data.filter(d =>
+                x0 <= xScatter(d.X) && xScatter(d.X) <= x1 &&
+                y0 <= yScatter(d.Y) && yScatter(d.Y) <= y1
+              ).map(d => d.id)
+            );
+
+            scatterPoints
+              .classed("selected", d => selectedPoints.has(d.id))
+              .style("opacity", d => selectedPoints.size === 0 || selectedPoints.has(d.id) ? 1 : 0.3);
+
+            const filteredData = selectedPoints.size > 0 ? data.filter(d => selectedPoints.has(d.id)) : data;
+            updateBarChart(filteredData);
+            updateHeatmap(filteredData);
+            updateParallelCoordinates(filteredData);
+          })
+          .on("end", (event) => {
+            if (!event.selection) {
+              scatterPoints.classed("selected", false).style("opacity", 1);
+              selectedPoints.clear();
+              updateBarChart(data);
+              updateHeatmap(data);
+              updateParallelCoordinates(data);
+            }
+          }));
+
+      function updateParallelCoordinates(filteredData) {
+        parallelSvg.selectAll("*").remove();
+        //parallelSvg.selectAll("g.dimension").remove();
+
+        const dimensions = Object.keys(filteredData[0]).filter(key =>
+          key !== "Cluster" && key !== "id" && key !== "X" && key !== "Y" && !isNaN(filteredData[0][key])
+        );
+
+        const yScales = {};
+        dimensions.forEach(dim => {
+          yScales[dim] = d3.scaleLinear()
+            .domain(d3.extent(filteredData, d => +d[dim]))
+            .range([parallelHeight, 0]);
+        });
+
+        const xScale = d3.scalePoint()
+          .domain(dimensions)
+          .range([0, parallelWidth])
+          //.padding(0.5);
+          .padding(1.5);
+
+        const line = d3.line()
+          //.defined(d => !isNaN(d[1]));
+          .defined(([dim, value]) => value !== null && !isNaN(value))
+          .x(([dim, value]) => xScale(dim))
+          .y(([dim, value]) => yScales[dim](value));
+
+        parallelSvg.selectAll(".background")
+          .data(filteredData)
+          .enter()
+          .append("path")
+          .attr("class", "background")
+          .attr("d", d => line(dimensions.map(dim => [dim, d[dim]])))
+          //.attr("d", d => line(dimensions.map(dim => [xScale(dim), yScales[dim](d[dim])])))
+          .style("stroke", "#ddd")
+          .style("fill", "none");
+
+        parallelSvg.selectAll(".foreground")
+          .data(filteredData)
+          .enter()
+          .append("path")
+          .attr("class", "foreground")
+          //.attr("d", d => line(dimensions.map(dim => [xScale(dim), yScales[dim](d[dim])])))
+          .attr("d", d => line(dimensions.map(dim => [dim, d[dim]])))
+          .style("stroke", "red")
+          .style("fill", "none")
+          .style("opacity", 0.7);
+
+        //const axis = d3.axisLeft();
+
+        const dimensionGroups = parallelSvg.selectAll(".dimension")
+          .data(dimensions)
+          .enter()
+          .append("g")
+          .attr("class", "dimension")
+          .attr("transform", d => `translate(${xScale(d)})`);
+
+        dimensionGroups.append("g")
+          .each(function(d) { d3.select(this).call(d3.axisLeft(yScales[d])); });
+
+        dimensionGroups.append("text")
+          .attr("class", "axis-label")
+          .style("font-size", "10px") 
+          .style("text-anchor", "middle")
+          .attr("y", -10)
+          //.attr("x", 0)
+          //.text(d => d)
+          //.attr("transform", "rotate(-30)") // Rotar las etiquetas
+          .text(d => d);
+      }
+
+      //let selectedSubgroups = new Map(); // Almacena los subgrupos seleccionados
+      let selectedBars = new Set(); // Almacena las combinaciones seleccionadas (Genero + Subgrupo)
+
+      function updateBarChart(filteredData) {
+        // Agrupa los datos por "Gender"
+        const groupedData = d3.group(filteredData, d => d.Gender);
+        const aggregatedData = Array.from(groupedData, ([key, values]) => {
+          const yes = values.filter(d => d.Depression === 1).length;
+          const no = values.length - yes;
+          return { group: key, Yes: yes, No: no };
+        });
+
+        const subgroups = ["Yes", "No"];
+        const groups = aggregatedData.map(d => d.group);
+
+        const xBar = d3.scaleBand().domain(groups).range([0, barWidth]).padding(0.2);
+        const xSubgroup = d3.scaleBand().domain(subgroups).range([0, xBar.bandwidth()]).padding(0.05);
+        const yBar = d3.scaleLinear().domain([0, d3.max(aggregatedData, d => Math.max(d.Yes, d.No))]).range([barHeight, 0]);
+
+        barSvg.selectAll("*").remove();
+
+        const group = barSvg.selectAll("g.group")
+          .data(aggregatedData)
+          .enter()
+          .append("g")
+          .attr("transform", d => `translate(${xBar(d.group)},0)`);
+
+        group.selectAll("rect")
+          .data(d => subgroups.map(key => ({ key, value: d[key], group: d.group })))
+          .join("rect")
+          .attr("x", d => xSubgroup(d.key))
+          .attr("y", d => yBar(d.value))
+          .attr("width", xSubgroup.bandwidth())
+          .attr("height", d => barHeight - yBar(d.value))
+          .attr("fill", d => colorScale(d.key))
+          .attr("stroke", d => (selectedBars.has(`${d.group}-${d.key}`) ? "black" : "none")) // Actualiza dinámicamente el borde
+          .attr("stroke-width", d => (selectedBars.has(`${d.group}-${d.key}`) ? 2 : 0)) // Solo agrega ancho si está seleccionado
+          .on("click", (event, d) => {
+            const key = `${d.group}-${d.key}`;
+            if (selectedBars.has(key)) {
+              selectedBars.delete(key); // Deseleccionar barra
+            } else {
+              selectedBars.add(key); // Seleccionar barra
+            }
+
+            // Filtrar datos según las barras seleccionadas
+            const highlightedData = filteredData.filter(point =>
+              Array.from(selectedBars.keys()).some(selectedKey => {
+                const [group, key] = selectedKey.split("-");
+                return point.Gender == group && ((key === "Yes" && point.Depression === 1) || (key === "No" && point.Depression === 0));
+              })
+            );
+
+            // Actualizar visualizaciones relacionadas
+            highlightScatterPoints(highlightedData);
+            updateHeatmap(highlightedData);
+            updateParallelCoordinates(highlightedData);
+
+            // **Redibujar las barras para reflejar la selección**
+            updateBarChart(filteredData);
+          });
+
+        barSvg.append("g")
+          .attr("transform", `translate(0,${barHeight})`)
+          .call(d3.axisBottom(xBar).tickFormat(d => d === 0 ? "Male" : d === 1 ? "Female" : d));
+        barSvg.append("g").call(d3.axisLeft(yBar));
+
+        createBarLegend(colorScale, subgroups);
+      }
+        
+
+      function highlightScatterPoints(data) {
+        scatterPoints
+          .classed("selected", d => data.some(point => point.id === d.id))
+          .style("opacity", d => data.some(point => point.id === d.id) ? 1 : 0.3);
+      }
+
+
+      
+
+      function updateHeatmap(filteredData) {
+        if (!filteredData || filteredData.length === 0) {
+          heatmapSvg.selectAll("*").remove();
+          return;
+        }
+
+        const numericVariables = Object.keys(filteredData[0]).filter(key =>
+          !isNaN(filteredData[0][key]) && key !== "id" && key !== "X" && key !== "Y" && key !== "Cluster"
+        );
+
+        const correlationData = numericVariables.map(x => {
+          return numericVariables.map(y => {
+            const xVals = filteredData.map(d => d[x]);
+            const yVals = filteredData.map(d => d[y]);
+            const corr = pearsonCorrelation(xVals, yVals);
+            return { x, y, value: isNaN(corr) ? 0 : corr };
+          });
+        }).flat();
+
+        heatmapSvg.selectAll("*").remove();
+
+        const xHeatScale = d3.scaleBand().domain(numericVariables).range([0, heatmapSize+50]).padding(0.01);
+        const yHeatScale = d3.scaleBand().domain(numericVariables).range([0, heatmapSize/2]).padding(0.01);
+        const colorScale = d3.scaleSequential(d3.interpolateRdBu).domain([-1, 1]);
+
+        // Rectángulos del heatmap
+        heatmapSvg.selectAll("rect")
+          .data(correlationData)
+          .enter()
+          .append("rect")
+          .attr("x", d => xHeatScale(d.x))
+          .attr("y", d => yHeatScale(d.y))
+          .attr("width", xHeatScale.bandwidth())
+          .attr("height", yHeatScale.bandwidth())
+          .style("fill", d => colorScale(d.value));
+
+        // Números dentro de las celdas
+        heatmapSvg.selectAll("text.cell-label")
+          .data(correlationData)
+          .enter()
+          .append("text")
+          .attr("class", "cell-label")
+          .attr("x", d => xHeatScale(d.x) + xHeatScale.bandwidth() / 2)
+          .attr("y", d => yHeatScale(d.y) + yHeatScale.bandwidth() / 2)
+          .text(d => d.value.toFixed(2))
+          .style("fill", d => Math.abs(d.value) > 0.5 ? "white" : "black")
+          .style("text-anchor", "middle")
+          .style("dominant-baseline", "central");
+
+        // Etiquetas del eje X
+        heatmapSvg.selectAll("text.x-axis-label")
+          .data(numericVariables)
+          .enter()
+          .append("text")
+          .attr("class", "x-axis-label")
+          .attr("x", d => xHeatScale(d) + xHeatScale.bandwidth() / 2) // Centra la etiqueta en el cuadrado
+          .attr("y", heatmapSize / 2 + 10) // Coloca el texto justo debajo del cuadrado
+          .text(d => d)
+          .style("text-anchor", "middle") // Centra el texto horizontalmente
+          .style("font-size", "12px"); // Ajusta el tamaño de la fuente para que sea legible
+
+        // Etiquetas del eje Y
+        heatmapSvg.selectAll("text.y-axis-label")
+          .data(numericVariables)
+          .enter()
+          .append("text")
+          .attr("class", "y-axis-label")
+          //.attr("x", -10) // Ajusta la posición a la izquierda del heatmap
+          .attr("y", d => yHeatScale(d) + yHeatScale.bandwidth() / 2)
+          .text(d => d)
+          .style("text-anchor", "end")
+          .style("dominant-baseline", "middle")
+          .style("font-size", "12px"); // Ajusta el tamaño de la fuente
+
+      }
+
+
+      function pearsonCorrelation(x, y) {
+        if (x.length !== y.length || x.length === 0) return 0; // Devuelve 0 si no hay datos suficientes
+        const meanX = d3.mean(x);
+        const meanY = d3.mean(y);
+        const numerator = d3.sum(x.map((xi, i) => (xi - meanX) * (y[i] - meanY)));
+        const denominator = Math.sqrt(
+          d3.sum(x.map(xi => Math.pow(xi - meanX, 2))) *
+          d3.sum(y.map(yi => Math.pow(yi - meanY, 2)))
+        );
+        return denominator === 0 ? 0 : numerator / denominator; // Evita divisiones por cero
+      }
+    });
+
+    document.getElementById("resetButton").addEventListener("click", () => {
+      
+      // Limpia las selecciones globales
+      selectedPoints.clear();
+      selectedBarGroup = null;
+
+      // Restablece el scatterplot
+      scatterPoints
+        .classed("selected", false) // Quita la clase seleccionada
+        .style("opacity", 1); // Restaura la opacidad inicial
+      
+      // Borra los elementos existentes de las visualizaciones
+      barSvg.selectAll("*").remove();
+      heatmapSvg.selectAll("*").remove();
+      parallelSvg.selectAll("*").remove();
+
+      // Recarga los datos originales para actualizar las visualizaciones
+      d3.csv("tsne_clusters_completo.csv").then(data => {
+        data.forEach((d, i) => {
+          d.id = i;
+          d.X = +d.X;
+          d.Y = +d.Y;
+          d.Depression = +d.Depression;
+          d.Gender = +d.Gender;
+          d.Cluster = d.Cluster;
+        });
+
+        // Vuelve a actualizar el gráfico de barras con los datos originales
+        updateBarChart(data);
+
+        // Vuelve a actualizar el heatmap con los datos originales
+        updateHeatmap(data);
+
+        // Restablece las coordenadas paralelas
+        updateParallelCoordinates(data);
+      });
+    });
+  </script>
+</body>
+</html>
